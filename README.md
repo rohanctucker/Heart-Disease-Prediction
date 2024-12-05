@@ -77,4 +77,4 @@ This project uses machine learning models to predict heart disease based on pati
 ### Usage
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/Heart-Disease-Prediction.git
+   git clone https://github.com/rohantucker/Heart-Disease-Prediction.git
