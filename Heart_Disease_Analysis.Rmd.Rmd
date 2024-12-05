@@ -1,0 +1,254 @@
+---
+title: "Heart Failure Detection"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE,  message=FALSE}
+library(caTools)
+library(caret)
+library(e1071)
+library(rpart)
+library(dplyr)
+library(rpart)
+```
+
+
+```{r}
+data <- read.csv("heart-disease.csv")
+
+colSums(is.na(data))
+
+str(data)
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+boxplot(data$age, 
+        main ="Distribution of Age", 
+        col = "red")
+boxplot(data$trestbps, 
+        main ="Distribution of Resting BP", 
+        col = "green")
+boxplot(data$chol, 
+        main ="Distribution of Cholesterol", 
+        col = "steel blue")
+boxplot(data$thalach, 
+        main ="Distribution of Max HR", 
+        col = "cyan")
+```
+
+```{r}
+outliers <- function(x) {
+
+  Q1 <- quantile(x, probs=.25)
+  Q3 <- quantile(x, probs=.75)
+  iqr = Q3-Q1
+
+ upper_limit = Q3 + (iqr*1.5)
+ lower_limit = Q1 - (iqr*1.5)
+
+ x > upper_limit | x < lower_limit
+}
+
+remove_outliers <- function(df, cols = names(df)) {
+  for (col in cols) {
+    df <- df[!outliers(df[[col]]),]
+  }
+  df
+}
+data <- remove_outliers(data, c('trestbps', 'chol', 'thalach'))
+```
+
+
+
+```{r}
+data$sex <- as.factor(data$sex)
+data$cp <- as.factor(data$cp)
+data$fbs <- as.factor(data$fbs)
+data$restecg <- as.factor(data$restecg)
+data$exang <- as.factor(data$exang)
+data$slope <- as.factor(data$slope)
+data$ca <- as.factor(data$ca)
+data$thal <- as.factor(data$thal)
+
+data$target[data$target == 0] <- "No"
+data$target[data$target == 1] <- "Yes"
+
+data$target <- as.factor(data$target)
+#data$FastingBS <- as.factor(data$FastingBS)
+str(data)
+```
+
+## Exploratory Data Analysis:
+
+```{r}
+ggplot(data, aes(x = target, y = age, fill = target)) +
+  geom_boxplot() +
+  labs(title = "Age Distribution By Heart Disease",
+       x = "Heart Disease",
+       y = "Age")
+```
+
+
+```{r}
+ggplot(data, aes(x = target, y = chol, fill = target)) +
+  geom_boxplot() +
+  labs(title = "Cholesterol Distribution By Heart Disease",
+       x = "Heart Disease",
+       y = "Cholesterol")
+```
+
+```{r}
+ggplot(data, aes(x = target, y = thalach, fill = target)) +
+  geom_boxplot() +
+  labs(title = "Maximum Heart Rate By Heart Disease",
+       x = "Heart Disease",
+       y = "Max Heart Rate")
+```
+
+```{r}
+ggplot(data, aes(x = target, y = oldpeak, fill = target)) +
+  geom_boxplot() +
+  labs(title = "ST depression By Heart Disease",
+       x = "Heart Disease",
+       y = "ST depression")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+res <- data %>%
+  group_by(target, sex) %>%
+  summarize(Count = n()) %>%
+  mutate(proportion = Count / sum(Count))
+
+# Create a stacked bar chart
+ggplot(res, aes(x = target, y = proportion, fill = sex)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.7) +
+  labs(title = "Proportion of Patients Having Heart Disease By Gender",
+       x = "Heart Disease",
+       y = "Proportion") +
+  scale_fill_brewer(palette = "Set2") +  # Custom color palette
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  geom_text(aes(label = scales::percent(proportion), group = sex),
+            position = position_fill(vjust = 0.5),
+            size = 3, angle = 90, hjust = 0.5, vjust = 0.5)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+res <- data %>%
+  group_by(target, cp) %>%
+  summarize(Count = n()) %>%
+  mutate(proportion = Count / sum(Count))
+
+# Create a stacked bar chart
+ggplot(res, aes(x = cp, y = proportion, fill = target)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.7) +
+  labs(title = "Proportion of Patients Having Heart Disease By Chest Pain Type",
+       x = "Heart Disease",
+       y = "Proportion") +
+  scale_fill_brewer(palette = "Set2") +  # Custom color palette
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  geom_text(aes(label = scales::percent(proportion), group = target),
+            position = position_fill(vjust = 0.5),
+            size = 3, angle = 90, hjust = 0.5, vjust = 0.5)
+```
+
+```{r, warning=FALSE, message=FALSE}
+res <- data %>%
+  group_by(target, slope) %>%
+  summarize(Count = n()) %>%
+  mutate(proportion = Count / sum(Count))
+
+# Create a stacked bar chart
+ggplot(res, aes(x = slope, y = proportion, fill = target)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.7) +
+  labs(title = "Proportion of Patients Having Heart Disease By ST Slope",
+       x = "Heart Disease",
+       y = "Proportion") +
+  scale_fill_brewer(palette = "Set2") +  # Custom color palette
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  geom_text(aes(label = scales::percent(proportion), group = target),
+            position = position_fill(vjust = 0.5),
+            size = 3, angle = 90, hjust = 0.5, vjust = 0.5)
+```
+
+
+## Data Modelling:
+
+```{r}
+res <- as.data.frame(table(data$target))
+colnames(res) <- c("Heart Disease", "Count")
+
+# Create a stacked bar chart
+ggplot(res, aes(x = `Heart Disease`, y = Count, fill = `Heart Disease`)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  labs(title = "Distribution of Patients By Heart Disease",
+       x = "Heart Disease",
+       y = "Frequency")
+```
+
+
+```{r}
+#make this example reproducible
+set.seed(1)
+
+#use 70% of dataset as training set and 30% as test set
+sample <- sample.split(data$target, SplitRatio = 0.7)
+train  <- subset(data, sample == TRUE)
+test   <- subset(data, sample == FALSE)
+```
+
+
+```{r}
+set.seed(1)
+model_glm <- glm(target ~.,
+                 data = train, family = 'binomial')
+predict <- predict(model_glm, test, type = 'response')
+# confusion matrix
+table_mat <- table(test$target, ifelse(predict > 0.5, "Yes", "No"))
+confusionMatrix(table_mat)
+```
+
+
+```{r}
+set.seed(1)
+model_nb <- naiveBayes(target ~.,
+                 data = train)
+predict <- predict(model_nb, test, type = 'class')
+# confusion matrix
+table_mat <- table(test$target, predict)
+confusionMatrix(table_mat)
+```
+
+
+```{r}
+set.seed(1)
+model_DT <- rpart(target ~.,
+                 data = train,
+                 method = "class")
+
+pred <- predict(model_DT, test, type = "class")
+# confusion matrix
+table_mat <- table(test$target, pred)
+confusionMatrix(table_mat)
+```
+
+## Saving Models:
+
+```{r}
+saveRDS(model_DT, "Decision_Tree_Model.rds")
+saveRDS(model_nb, "Naive_Bayes_Model.rds")
+saveRDS(model_glm, "Logistic_Regression_Model.rds")
+```
+
+
+
